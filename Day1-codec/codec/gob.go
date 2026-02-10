@@ -26,16 +26,16 @@ func newGobCodec(conn io.ReadWriteCloser) Codec {
 	}
 }
 
-func (c *GobCodec) readHeader(h *header) error {
+func (c *GobCodec) ReadHeader(h *Header) error {
 	return c.decoder.Decode(h)
 }
-func (c *GobCodec) readBody(body interface{}) error {
+func (c *GobCodec) ReadBody(body interface{}) error {
 	return c.decoder.Decode(body)
 }
 func (c *GobCodec) Close() error {
 	return c.conn.Close()
 }
-func (c *GobCodec) write(h *header, body interface{}) (err error) {
+func (c *GobCodec) Write(h *Header, body interface{}) (err error) {
 	defer func() {
 		c.buf.Flush()
 		if err != nil {
