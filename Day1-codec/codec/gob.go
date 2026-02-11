@@ -16,7 +16,7 @@ type GobCodec struct {
 
 var _ Codec = (*GobCodec)(nil)
 
-func newGobCodec(conn io.ReadWriteCloser) Codec {
+func NewGobCodec(conn io.ReadWriteCloser) Codec {
 	buf := bufio.NewWriter(conn)
 	return &GobCodec{
 		conn:    conn,
@@ -42,11 +42,11 @@ func (c *GobCodec) Write(h *Header, body interface{}) (err error) {
 			_ = c.Close()
 		}
 	}()
-	if err := c.encoder.Encode(h); err != nil {
+	if err = c.encoder.Encode(h); err != nil {
 		log.Println("rpc: gob error encoding header:", err)
 		return
 	}
-	if err := c.encoder.Encode(body); err != nil {
+	if err = c.encoder.Encode(body); err != nil {
 		log.Println("rpc:gob error encoding body:", err)
 		return
 	}

@@ -7,7 +7,7 @@ import (
 type Header struct {
 	ServiceMethod string
 	Seq           uint64
-	err           string
+	Err           string
 }
 
 type Codec interface {
@@ -29,5 +29,5 @@ const (
 
 func init() {
 	NewCodecFuncMap = make(map[Type]newCodecFunc)
-	NewCodecFuncMap[GobType] = newGobCodec
+	NewCodecFuncMap[GobType] = NewGobCodec
 }

@@ -14,12 +14,12 @@ import (
 const MagicNumber = 0x3bef5c
 
 type Option struct {
-	magicNumber int
+	MagicNumber int
 	Codetype    codec.Type
 }
 
 var DefaultOption = &Option{
-	magicNumber: MagicNumber,
+	MagicNumber: MagicNumber,
 	Codetype:    codec.GobType,
 }
 
@@ -45,7 +45,7 @@ func (server *Server) serverConn(conn io.ReadWriteCloser) {
 		log.Println("rpc server: options error: ", err)
 		return
 	}
-	if opt.magicNumber != MagicNumber {
+	if opt.MagicNumber != MagicNumber {
 		log.Println("invalid magicnumber error: ")
 		return
 	}
@@ -57,7 +57,30 @@ func (server *Server) serverConn(conn io.ReadWriteCloser) {
 	server.serveCodec(f(conn))
 }
 
-func (server *Server) serveCodec(cc codec.Codec) {}
+// invalidRequest is a placeholder for response argv when error occurs
+var invalidRequest = struct{}{}
+
+func (server *Server) serveCodec(cc codec.Codec) {
+	sending := new(sync.Mutex)
+	wg := new(sync.WaitGroup)
+
+	for {
+		req, err := server.readRequest(cc)
+		if err != nil {
+			if req == nil {
+				break
+			}
+			req.header.Err = err.Error()
+			server.SendResponse(cc, req.header, invalidRequest, sending)
+		}
+		wg.Add(1)
+		go server.handleRequest(cc, req, sending, wg)
+		continue
+	}
+	wg.Wait()
+	_ = cc.Close()
+
+}
 
 func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
 	var header codec.Header
@@ -84,7 +107,7 @@ func (server *Server) readRequest(codec codec.Codec) (*request, error) {
 	}
 	return req, nil
 }
-func (server *Server) sendResponse(codec codec.Codec, header *codec.Header, body interface{}, sending *sync.Mutex) {
+func (server *Server) SendResponse(codec codec.Codec, header *codec.Header, body interface{}, sending *sync.Mutex) {
 	sending.Lock()
 	defer sending.Unlock()
 	if err := codec.Write(header, body); err != nil {
@@ -96,7 +119,7 @@ func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.
 	defer wg.Done()
 	log.Println(req.header, req.argv.Elem())
 	req.replyv = reflect.ValueOf(fmt.Sprintf("geerpc resp %d", req.header.Seq))
-	server.sendResponse(cc, req.header, req.argv.Elem(), sending)
+	server.SendResponse(cc, req.header, req.replyv.Interface(), sending)
 }
 func (server *Server) Accept(l net.Listener) {
 	for {
