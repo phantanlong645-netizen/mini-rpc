@@ -3,11 +3,12 @@ package Jeerpc
 import (
 	"Day1-codec/codec"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"log"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -23,7 +24,9 @@ var DefaultOption = &Option{
 	Codetype:    codec.GobType,
 }
 
-type Server struct{}
+type Server struct {
+	serviceMap sync.Map
+}
 
 func NewServer() *Server {
 	return &Server{}
@@ -32,6 +35,8 @@ func NewServer() *Server {
 type request struct {
 	header       *codec.Header
 	argv, replyv reflect.Value
+	service      *Service
+	mtype        *MethodType
 }
 
 var DefaultServer = NewServer()
@@ -93,6 +98,27 @@ func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
 	return &header, nil
 }
 
+func (server *Server) FindService(MethodName string) (svr *Service, mtype *MethodType, err error) {
+	dot := strings.LastIndex(MethodName, ".")
+	if dot < 0 {
+		err = errors.New("rpc server: service/method request ill-formed: " + MethodName)
+		return
+	}
+	methodName := MethodName[dot+1:]
+	servicename := MethodName[:dot]
+	svci, ok := server.serviceMap.Load(servicename)
+	if !ok {
+		err = errors.New("rpc server: can't find service " + servicename)
+		return
+	}
+	svr = svci.(*Service)
+	mtype = svr.methods[methodName]
+	if mtype == nil {
+		err = errors.New("rpc server: can't find method " + methodName)
+	}
+	return
+}
+
 func (server *Server) readRequest(codec codec.Codec) (*request, error) {
 	h, err := server.readRequestHeader(codec)
 	if err != nil {
@@ -101,9 +127,21 @@ func (server *Server) readRequest(codec codec.Codec) (*request, error) {
 	req := &request{
 		header: h,
 	}
-	req.argv = reflect.New(reflect.TypeOf(""))
-	if err := codec.ReadBody(req.argv.Interface()); err != nil {
-		log.Printf("read request body error: %s \n", err)
+	svr, mtype, err := server.FindService(h.ServiceMethod)
+	if err != nil {
+		return req, err
+	}
+	req.argv = mtype.NewArgv()
+	req.replyv = mtype.NewReplyv()
+	req.service = svr
+	req.mtype = mtype
+	argv := req.argv.Interface()
+	if req.argv.Type().Kind() != reflect.Ptr {
+		argv = req.argv.Addr().Interface()
+	}
+	if err := codec.ReadBody(argv); err != nil {
+		log.Println("rpc server: read body err:", err)
+		return req, err
 	}
 	return req, nil
 }
@@ -118,7 +156,13 @@ func (server *Server) SendResponse(codec codec.Codec, header *codec.Header, body
 func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
 	defer wg.Done()
 	log.Println(req.header, req.argv.Elem())
-	req.replyv = reflect.ValueOf(fmt.Sprintf("geerpc resp %d", req.header.Seq))
+	svr := req.service
+	err := svr.Call(req.mtype, req.argv, req.replyv)
+	if err != nil {
+		req.header.Err = err.Error()
+		server.SendResponse(cc, req.header, invalidRequest, sending)
+		return
+	}
 	server.SendResponse(cc, req.header, req.replyv.Interface(), sending)
 }
 func (server *Server) Accept(l net.Listener) {
@@ -134,3 +178,13 @@ func (server *Server) Accept(l net.Listener) {
 func Accept(lis net.Listener) {
 	DefaultServer.Accept(lis)
 }
+
+func (server *Server) Register(rcvr interface{}) error {
+	s := NewService(rcvr)
+	if _, dup := server.serviceMap.LoadOrStore(s.name, s); dup {
+		return errors.New("rpc: service already defined: " + s.name)
+	}
+	return nil
+}
+
+func Register(rcvr interface{}) error { return DefaultServer.Register(rcvr) }

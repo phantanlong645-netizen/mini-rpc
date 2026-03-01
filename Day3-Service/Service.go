@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 )
 
-type methodType struct {
+type MethodType struct {
 	Method   reflect.Method
 	Args     reflect.Type
 	Reply    reflect.Type
@@ -18,10 +18,10 @@ type Service struct {
 	name    string
 	rcvr    reflect.Value
 	typ     reflect.Type
-	methods map[string]*methodType
+	methods map[string]*MethodType
 }
 
-func (m *methodType) NewArgv() reflect.Value {
+func (m *MethodType) NewArgv() reflect.Value {
 	var arg reflect.Value
 	if m.Args.Kind() == reflect.Ptr {
 		arg = reflect.New(m.Args.Elem())
@@ -31,7 +31,7 @@ func (m *methodType) NewArgv() reflect.Value {
 	return arg
 }
 
-func (m *methodType) NewReplyv() reflect.Value {
+func (m *MethodType) NewReplyv() reflect.Value {
 	var replyv = reflect.New(m.Reply.Elem())
 	switch m.Reply.Elem().Kind() {
 	case reflect.Map:
@@ -55,7 +55,7 @@ func NewService(rcvr interface{}) *Service {
 }
 
 func (s *Service) RegisterMethod() {
-	s.methods = make(map[string]*methodType)
+	s.methods = make(map[string]*MethodType)
 	for i := 0; i < s.typ.NumMethod(); i++ {
 		method := s.typ.Method(i)
 		mtype := method.Type
@@ -70,7 +70,7 @@ func (s *Service) RegisterMethod() {
 		if !isExportedOrBuiltinType(argtype) || !isExportedOrBuiltinType(replytype) {
 			continue
 		}
-		s.methods[method.Name] = &methodType{
+		s.methods[method.Name] = &MethodType{
 			Method: method,
 			Args:   argtype,
 			Reply:  replytype,
@@ -78,7 +78,7 @@ func (s *Service) RegisterMethod() {
 		log.Printf("rpc server: register %s.%s\n", s.name, method.Name)
 	}
 }
-func (s *Service) Call(m *methodType, argv, reply reflect.Value) error {
+func (s *Service) Call(m *MethodType, argv, reply reflect.Value) error {
 	atomic.AddUint64(&m.NumCalls, 1)
 	f := m.Method.Func
 	returnValues := f.Call([]reflect.Value{s.rcvr, argv, reply})
