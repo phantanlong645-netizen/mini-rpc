@@ -1,9 +1,10 @@
-package Day3_Service
+package Day4_timeout
 
 import (
 	"Day1-codec/codec"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -63,13 +64,13 @@ func (server *Server) serverConn(conn io.ReadWriteCloser) {
 		log.Println("invalid codetype: ", opt.Codetype)
 		return
 	}
-	server.serveCodec(f(conn))
+	server.serveCodec(f(conn), &opt)
 }
 
 // invalidRequest is a placeholder for response argv when error occurs
 var invalidRequest = struct{}{}
 
-func (server *Server) serveCodec(cc codec.Codec) {
+func (server *Server) serveCodec(cc codec.Codec, opt *Option) {
 	sending := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
 
@@ -83,7 +84,7 @@ func (server *Server) serveCodec(cc codec.Codec) {
 			server.SendResponse(cc, req.header, invalidRequest, sending)
 		}
 		wg.Add(1)
-		go server.handleRequest(cc, req, sending, wg)
+		go server.handleRequest(cc, req, sending, wg, opt.HandleTimeout)
 		continue
 	}
 	wg.Wait()
@@ -157,16 +158,34 @@ func (server *Server) SendResponse(codec codec.Codec, header *codec.Header, body
 	}
 }
 
-func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
+func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup, timeout time.Duration) {
 	defer wg.Done()
-	svr := req.service
-	err := svr.Call(req.mtype, req.argv, req.replyv)
-	if err != nil {
-		req.header.Err = err.Error()
-		server.SendResponse(cc, req.header, invalidRequest, sending)
-		return
+	called := make(chan struct{})
+	sent := make(chan struct{})
+	go func() {
+		svr := req.service
+		err := svr.Call(req.mtype, req.argv, req.replyv)
+		called <- struct{}{}
+		if err != nil {
+			req.header.Err = err.Error()
+			server.SendResponse(cc, req.header, invalidRequest, sending)
+			sent <- struct{}{}
+			return
+		}
+		server.SendResponse(cc, req.header, req.replyv.Interface(), sending)
+		sent <- struct{}{}
+	}()
+	if timeout == 0 {
+		<-called
+		<-sent
 	}
-	server.SendResponse(cc, req.header, req.replyv.Interface(), sending)
+	select {
+	case <-called:
+		<-sent
+	case <-time.After(timeout):
+		req.header.Err = fmt.Sprintf("rpc server: request handle timeout: expect within %s", timeout)
+		server.SendResponse(cc, req.header, invalidRequest, sending)
+	}
 }
 func (server *Server) Accept(l net.Listener) {
 	for {

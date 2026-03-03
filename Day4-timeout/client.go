@@ -1,7 +1,8 @@
-package Day3_Service
+package Day4_timeout
 
 import (
 	"Day1-codec/codec"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -119,7 +120,7 @@ func (client *Client) Receive() {
 		case call == nil:
 			err = client.Cc.ReadBody(nil)
 		case header.Err != "":
-			call.Err = fmt.Errorf(header.Err)
+			call.Err = errors.New(header.Err)
 			_ = client.Cc.ReadBody(nil)
 			call.Done()
 		default:
@@ -150,9 +151,15 @@ func (client *Client) Go(serviceMethod string, args interface{}, reply interface
 	client.Send(call)
 	return call
 }
-func (client *Client) Call(serviceMethod string, args interface{}, reply interface{}) error {
-	call := <-client.Go(serviceMethod, args, reply, make(chan *Call, 1)).DDone
-	return call.Err
+func (client *Client) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error {
+	call := client.Go(serviceMethod, args, reply, make(chan *Call, 1))
+	select {
+	case <-ctx.Done():
+		client.RemoveCall(call.Seq)
+		return errors.New("rpc client: call failed: " + ctx.Err().Error())
+	case call := <-call.DDone:
+		return call.Err
+	}
 }
 
 func NewClient(opt *Option, conn net.Conn) (*Client, error) {
