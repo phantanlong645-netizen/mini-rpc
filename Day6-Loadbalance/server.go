@@ -1,4 +1,4 @@
-package Day4_timeout
+package Day5_http
 
 import (
 	"Day1-codec/codec"
@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
@@ -82,6 +83,7 @@ func (server *Server) serveCodec(cc codec.Codec, opt *Option) {
 			}
 			req.header.Err = err.Error()
 			server.SendResponse(cc, req.header, invalidRequest, sending)
+			continue
 		}
 		wg.Add(1)
 		go server.handleRequest(cc, req, sending, wg, opt.HandleTimeout)
@@ -89,6 +91,7 @@ func (server *Server) serveCodec(cc codec.Codec, opt *Option) {
 	}
 	wg.Wait()
 	_ = cc.Close()
+
 }
 
 func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
@@ -96,8 +99,8 @@ func (server *Server) readRequestHeader(cc codec.Codec) (*codec.Header, error) {
 	if err := cc.ReadHeader(&header); err != nil {
 		if err != io.EOF && err != io.ErrUnexpectedEOF {
 			log.Printf("read request header error: %s \n", err)
-			return nil, err
 		}
+		return nil, err
 	}
 	return &header, nil
 }
@@ -177,6 +180,7 @@ func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.
 	if timeout == 0 {
 		<-called
 		<-sent
+		return
 	}
 	select {
 	case <-called:
@@ -209,3 +213,34 @@ func (server *Server) Register(rcvr interface{}) error {
 }
 
 func Register(rcvr interface{}) error { return DefaultServer.Register(rcvr) }
+
+const (
+	connected        = "200 Connected to Gee RPC"
+	defaultRPCPath   = "/_geeprc_"
+	defaultDebugPath = "/debug/geerpc"
+)
+
+func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.Method != "CONNECT" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = io.WriteString(w, "405 must CONNECT\n")
+		return
+	}
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		log.Print("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
+		return
+	}
+	_, _ = io.WriteString(conn, "HTTP/1.0 "+connected+"\n\n")
+	server.serverConn(conn)
+}
+
+func (server *Server) HandleHTTP() {
+	http.Handle(defaultRPCPath, server)
+	http.Handle(defaultDebugPath, debugHttp{server})
+	log.Println("rpc server debug path:", defaultDebugPath)
+}
+func HandleHTTP() {
+	DefaultServer.HandleHTTP()
+}
