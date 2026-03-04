@@ -1,7 +1,8 @@
-package Day4_timeout
+package Day5_http
 
 import (
 	"Day1-codec/codec"
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -120,7 +123,7 @@ func (client *Client) Receive() {
 		case call == nil:
 			err = client.Cc.ReadBody(nil)
 		case header.Err != "":
-			call.Err = fmt.Errorf(header.Err)
+			call.Err = errors.New(header.Err)
 			_ = client.Cc.ReadBody(nil)
 			call.Done()
 		default:
@@ -243,5 +246,36 @@ func DialTimeout(f NewClientFunc, network, addr string, opt ...*Option) (client 
 		return result.Client, result.Err
 	case <-time.After(opts.ConnectTimeout):
 		return nil, fmt.Errorf("rpc client: connect timeout: expect within %s", opts.ConnectTimeout)
+	}
+}
+
+func NewHTTPClient(opt *Option, conn net.Conn) (*Client, error) {
+	_, _ = io.WriteString(conn, fmt.Sprintf("CONNECT %s HTTP/1.0\n\n", defaultRPCPath))
+
+	// Require successful HTTP response
+	// before switching to RPC protocol.
+	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: "CONNECT"})
+	if err == nil && resp.Status == connected {
+		return NewClient(opt, conn)
+	}
+	if err == nil {
+		err = errors.New("unexpected HTTP response: " + resp.Status)
+	}
+	return nil, err
+}
+func DialHTTP(network, address string, opts ...*Option) (*Client, error) {
+	return DialTimeout(NewHTTPClient, network, address, opts...)
+}
+func XDial(rpcAddr string, opts ...*Option) (*Client, error) {
+	parts := strings.Split(rpcAddr, "@")
+	if len(parts) != 2 {
+		return nil, errors.New("invalid rpc address: " + rpcAddr)
+	}
+	protocol, addr := parts[0], parts[1]
+	switch protocol {
+	case "http":
+		return DialHTTP("tcp", addr, opts...)
+	default:
+		return Dial(protocol, addr, opts...)
 	}
 }
