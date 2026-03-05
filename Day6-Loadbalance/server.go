@@ -1,7 +1,7 @@
 package Day5_http
 
 import (
-	"Day1-codec/codec"
+	"Day6-Loadbalance/codec"
 	"encoding/json"
 	"errors"
 	"fmt"

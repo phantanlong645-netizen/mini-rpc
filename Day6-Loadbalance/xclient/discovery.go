@@ -67,7 +67,6 @@ func (d *MultiServerDiscovery) Get(mode SelectMode) (string, error) {
 	default:
 		return "", errors.New("invalid select mode")
 	}
-
 }
 func (d *MultiServerDiscovery) GetAll() ([]string, error) {
 	d.mu.RLock()
