@@ -9,7 +9,7 @@ import (
 )
 
 type Xclient struct {
-	d       *MultiServerDiscovery
+	d       Discovery
 	mu      sync.Mutex
 	opt     *Day5_http.Option
 	clients map[string]*Day5_http.Client
@@ -18,7 +18,7 @@ type Xclient struct {
 
 var _ io.Closer = (*Xclient)(nil)
 
-func NewXclient(d *MultiServerDiscovery, opt *Day5_http.Option, mode SelectMode) *Xclient {
+func NewXclient(d Discovery, opt *Day5_http.Option, mode SelectMode) *Xclient {
 	return &Xclient{
 		d:       d,
 		opt:     opt,
